@@ -8,6 +8,9 @@ import Starscream
 class WebSocketConnection {
     let url: WCURL
     private let socket: WebSocket
+
+    private var isConnected: Bool = false
+
     private let onConnect: (() -> Void)?
     private let onDisconnect: ((Error?) -> Void)?
     private let onTextReceive: ((String) -> Void)?
@@ -23,7 +26,7 @@ class WebSocketConnection {
     private let serialCallbackQueue: DispatchQueue
 
     var isOpen: Bool {
-        return socket.isConnected
+        return isConnected
     }
 
     init(url: WCURL,
@@ -35,21 +38,27 @@ class WebSocketConnection {
         self.onDisconnect = onDisconnect
         self.onTextReceive = onTextReceive
         serialCallbackQueue = DispatchQueue(label: "org.walletconnect.swift.connection-\(url.bridgeURL)-\(url.topic)")
-        socket = WebSocket(url: url.bridgeURL)
-        socket.delegate = self
-        socket.callbackQueue = serialCallbackQueue
+
+        self.socket = WebSocket(request: URLRequest(url: url.bridgeURL), engine: WSEngine(transport: FoundationTransport(), certPinner: FoundationSecurity()))
+        self.socket.callbackQueue = serialCallbackQueue
+        self.socket.delegate = self
+    }
+
+    deinit {
+        self.pingTimer?.invalidate()
     }
 
     func open() {
-        socket.connect()
+        self.socket.connect()
     }
 
-    func close() {
-        socket.disconnect()
+    func close(closeCode: UInt16 = CloseCode.normal.rawValue) {
+        self.socket.disconnect(closeCode: closeCode)
+        self.pingTimer?.invalidate()
     }
 
     func send(_ text: String) {
-        guard socket.isConnected else { return }
+        guard isConnected else { return }
         socket.write(string: text)
         log(text)
     }
@@ -66,24 +75,47 @@ class WebSocketConnection {
 }
 
 extension WebSocketConnection: WebSocketDelegate {
-    func websocketDidConnect(socket: WebSocketClient) {
-        pingTimer = Timer.scheduledTimer(withTimeInterval: pingInterval, repeats: true) { [weak self] _ in
-            LogService.shared.log("WC: ==> ping")
-            self?.socket.write(ping: Data())
+    func didReceive(event: WebSocketEvent, client: WebSocket) {
+        switch event {
+        case .connected:
+            DispatchQueue.main.sync {
+                self.pingTimer = Timer.scheduledTimer(withTimeInterval: self.pingInterval,
+                                                      repeats: true) { [weak self] _ in
+                    LogService.shared.log("WC: ==> ping")
+                    self?.socket.write(ping: Data())
+                }
+            }
+            LogService.shared.log("WC: <== connected")
+            isConnected = true
+            onConnect?()
+        case .disconnected:
+            didDisconnect(with: nil)
+        case .error(let error):
+            didDisconnect(with: error)
+        case .cancelled:
+            didDisconnect(with: nil)
+        case .text(let string):
+            onTextReceive?(string)
+        case .ping:
+            LogService.shared.log("WC: <== ping")
+            LogService.shared.log("WC: ==> pong client.respondToPingWithPong: \(client.respondToPingWithPong == true)")
+            break
+        case .pong:
+            LogService.shared.log("WC: <== pong")
+        case .reconnectSuggested:
+            LogService.shared.log("WC: <== reconnectSuggested") //TODO: Should we?
+        case .binary, .viabilityChanged:
+            break
         }
-        onConnect?()
     }
 
-    func websocketDidDisconnect(socket: WebSocketClient, error: Error?) {
-        pingTimer?.invalidate()
+    private func didDisconnect(with error: Error? = nil) {
+        LogService.shared.log("WC: <== disconnected")
+        if let error = error {
+            LogService.shared.log("^------ with error: \(error)")
+        }
+        self.isConnected = false
+        self.pingTimer?.invalidate()
         onDisconnect?(error)
-    }
-
-    func websocketDidReceiveMessage(socket: WebSocketClient, text: String) {
-        onTextReceive?(text)
-    }
-
-    func websocketDidReceiveData(socket: WebSocketClient, data: Data) {
-        // no-op
     }
 }

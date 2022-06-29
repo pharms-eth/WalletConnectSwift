@@ -78,3 +78,7 @@ public struct Session: Codable {
         }
     }
 }
+
+extension Session: Equatable {
+    
+}
