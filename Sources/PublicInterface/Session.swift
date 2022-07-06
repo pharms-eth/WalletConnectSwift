@@ -5,7 +5,7 @@
 import Foundation
 
 /// Each session is a communication channel between dApp and Wallet on dAppInfo.peerId topic
-public struct Session: Codable {
+public struct Session: Codable, Equatable {
     // TODO: handle protocol version
     public let url: WCURL
     public let dAppInfo: DAppInfo
@@ -77,8 +77,4 @@ public struct Session: Codable {
                               peerMeta: self.peerMeta)
         }
     }
-}
-
-extension Session: Equatable {
-    
 }

@@ -24,10 +24,8 @@ class Bridge: Transport {
     // TODO: if no connection found, then what?
     func send(to url: WCURL, text: String) {
         dispatchPrecondition(condition: .notOnQueue(syncQueue))
-        syncQueue.sync { [unowned self] in
-            if let connection = self.findConnection(url: url) {
-                connection.send(text)
-            }
+        syncQueue.sync { [weak self] in
+            self?.findConnection(url: url)?.send(text)
         }
     }
 

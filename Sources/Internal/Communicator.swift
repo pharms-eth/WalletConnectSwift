@@ -79,7 +79,9 @@ class Communicator {
     }
 
     func send(_ response: Response, topic: String) {
-        let text = try! responseSerializer.serialize(response, topic: topic)
+        guard let text = try? responseSerializer.serialize(response, topic: topic) else {
+            return
+        }
         transport.send(to: response.url, text: text)
     }
 
